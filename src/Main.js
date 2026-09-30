@@ -53,9 +53,15 @@ function setup() {
     Log.info('✔ OpenRouter-Key gültig' + (free ? ' – Gratis-Anfragen heute: ' + free.used + '/' + free.limit : '') +
       (key.is_free_tier ? ' (Free Tier: 50 Anfragen/Tag)' : ''));
     try {
-      const available = OpenRouter.listFreeModels().map(m => m.id);
+      const free = OpenRouter.listFreeModels();
+      const available = free.map(m => m.id);
       cfg.LLM_MODELS.filter(id => available.indexOf(id) === -1).forEach(id =>
         Log.warn('Modell nicht (mehr) kostenlos verfügbar: ' + id + ' – siehe listFreeModels()'));
+      if (cfg.LLM_ZDR_ONLY) {
+        free.filter(m => m.zdr === false && m.id !== 'openrouter/free' && cfg.LLM_MODELS.indexOf(m.id) !== -1).forEach(m =>
+          Log.warn('Modell hat keinen Anbieter ohne Datenspeicherung (ZDR) und wird nie genutzt: ' + m.id));
+        Log.info('✔ Datenschutz: nur KI-Anbieter ohne Datenspeicherung (ZDR) – kein Training mit deinen Nachrichten.');
+      }
     } catch (e) {
       Log.warn('Modellliste nicht prüfbar: ' + Log.errorMessage(e));
     }
@@ -127,7 +133,7 @@ function debugLatestMail() {
   console.log('Extraktion:     ' + mail.extraction + ' (MARKER = sicher erkannt)');
   console.log('--- ROHTEXT (gekürzt) ---\n' + TextUtils.truncate(mail.rawBody, 3000));
   console.log('--- EXTRAHIERTE NACHRICHT ---\n' + mail.text);
-  console.log('--- AN DIE KI (geschwärzt) ---\n' + Prompt.sanitizeMessage(mail.text, cfg.LLM_MAX_INPUT_CHARS));
+  console.log('--- AN DIE KI (geschwärzt) ---\n' + Prompt.sanitizeMessage(mail.text, cfg.LLM_MAX_INPUT_CHARS, [mail.senderName]));
   console.log('--- REGELPRÜFUNG ---\nStufe ' + rules.level + ', Score ' + rules.score + '\n' +
     (rules.findings.map(f => '• ' + f.id + ' (' + f.weight + '): ' + f.label + (f.evidence ? ' [' + f.evidence + ']' : '')).join('\n') || '• keine Treffer'));
   console.log('--- HEURISTIK ---\n' + JSON.stringify(heuristics, null, 2));
@@ -148,8 +154,9 @@ function testLatestMail() {
 function listFreeModels() {
   Config.reset();
   const cfg = Config.load();
-  const models = OpenRouter.listFreeModels();
-  models.forEach(m => Log.info(m.id + ' · Kontext ' + m.context + (m.jsonMode ? ' · JSON-Modus' : '')));
+  const models = OpenRouter.listFreeModels().sort((a, b) => (b.zdr ? 1 : 0) - (a.zdr ? 1 : 0));
+  models.forEach(m => Log.info(m.id + ' · Kontext ' + m.context + (m.jsonMode ? ' · JSON-Modus' : '') +
+    (m.zdr ? ' · ZDR (keine Datenspeicherung)' : '')));
   Log.info(models.length + ' kostenlose Modelle. Aktuell konfiguriert (LLM_MODELS): ' + cfg.LLM_MODELS.join(', '));
 }
 

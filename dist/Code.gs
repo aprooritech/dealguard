@@ -60,9 +60,15 @@ function setup() {
     Log.info('✔ OpenRouter-Key gültig' + (free ? ' – Gratis-Anfragen heute: ' + free.used + '/' + free.limit : '') +
       (key.is_free_tier ? ' (Free Tier: 50 Anfragen/Tag)' : ''));
     try {
-      const available = OpenRouter.listFreeModels().map(m => m.id);
+      const free = OpenRouter.listFreeModels();
+      const available = free.map(m => m.id);
       cfg.LLM_MODELS.filter(id => available.indexOf(id) === -1).forEach(id =>
         Log.warn('Modell nicht (mehr) kostenlos verfügbar: ' + id + ' – siehe listFreeModels()'));
+      if (cfg.LLM_ZDR_ONLY) {
+        free.filter(m => m.zdr === false && m.id !== 'openrouter/free' && cfg.LLM_MODELS.indexOf(m.id) !== -1).forEach(m =>
+          Log.warn('Modell hat keinen Anbieter ohne Datenspeicherung (ZDR) und wird nie genutzt: ' + m.id));
+        Log.info('✔ Datenschutz: nur KI-Anbieter ohne Datenspeicherung (ZDR) – kein Training mit deinen Nachrichten.');
+      }
     } catch (e) {
       Log.warn('Modellliste nicht prüfbar: ' + Log.errorMessage(e));
     }
@@ -134,7 +140,7 @@ function debugLatestMail() {
   console.log('Extraktion:     ' + mail.extraction + ' (MARKER = sicher erkannt)');
   console.log('--- ROHTEXT (gekürzt) ---\n' + TextUtils.truncate(mail.rawBody, 3000));
   console.log('--- EXTRAHIERTE NACHRICHT ---\n' + mail.text);
-  console.log('--- AN DIE KI (geschwärzt) ---\n' + Prompt.sanitizeMessage(mail.text, cfg.LLM_MAX_INPUT_CHARS));
+  console.log('--- AN DIE KI (geschwärzt) ---\n' + Prompt.sanitizeMessage(mail.text, cfg.LLM_MAX_INPUT_CHARS, [mail.senderName]));
   console.log('--- REGELPRÜFUNG ---\nStufe ' + rules.level + ', Score ' + rules.score + '\n' +
     (rules.findings.map(f => '• ' + f.id + ' (' + f.weight + '): ' + f.label + (f.evidence ? ' [' + f.evidence + ']' : '')).join('\n') || '• keine Treffer'));
   console.log('--- HEURISTIK ---\n' + JSON.stringify(heuristics, null, 2));
@@ -155,8 +161,9 @@ function testLatestMail() {
 function listFreeModels() {
   Config.reset();
   const cfg = Config.load();
-  const models = OpenRouter.listFreeModels();
-  models.forEach(m => Log.info(m.id + ' · Kontext ' + m.context + (m.jsonMode ? ' · JSON-Modus' : '')));
+  const models = OpenRouter.listFreeModels().sort((a, b) => (b.zdr ? 1 : 0) - (a.zdr ? 1 : 0));
+  models.forEach(m => Log.info(m.id + ' · Kontext ' + m.context + (m.jsonMode ? ' · JSON-Modus' : '') +
+    (m.zdr ? ' · ZDR (keine Datenspeicherung)' : '')));
   Log.info(models.length + ' kostenlose Modelle. Aktuell konfiguriert (LLM_MODELS): ' + cfg.LLM_MODELS.join(', '));
 }
 
@@ -1272,7 +1279,8 @@ const HeuristicAnalyzer = (() => {
  * Schutz gegen Prompt-Injection:
  * - Die Käufernachricht steht isoliert zwischen <nachricht>-Tags und wird ausdrücklich als Daten markiert.
  * - Versuche, die Tags selbst zu schließen, werden entfernt.
- * - Telefonnummern, E-Mails, IBANs und Links werden vorher durch Platzhalter ersetzt (Datensparsamkeit).
+ * - Personenbezogene Daten (Namen, Kontakt-, Adress-, Bank- und Kartendaten, Codes, Links) werden vorher
+ *   durch Platzhalter ersetzt (TextUtils.redactPii); der Name des Interessenten wird gar nicht übertragen.
  * - Unabhängig davon kann das LLM die Regelbewertung nur erhöhen, nie senken (RiskEngine.combine).
  */
 const Prompt = (() => {
@@ -1280,8 +1288,8 @@ const Prompt = (() => {
     return String(cfg.FORM_OF_ADDRESS || '').toLowerCase() === 'sie';
   }
 
-  function sanitizeMessage(text, maxChars) {
-    const redacted = TextUtils.redactPii(text).replace(/<\s*\/?\s*nachricht\s*>/gi, '[tag entfernt]');
+  function sanitizeMessage(text, maxChars, names) {
+    const redacted = TextUtils.redactPii(text, names).replace(/<\s*\/?\s*nachricht\s*>/gi, '[tag entfernt]');
     return TextUtils.truncate(redacted, maxChars);
   }
 
@@ -1305,11 +1313,13 @@ const Prompt = (() => {
       '   Käufer angeblich im Ausland; Kauf ungesehen zum vollen Preis;',
       '   bei eBay: Bitte, das Angebot vorzeitig zu beenden und direkt (außerhalb von eBay) zu bezahlen.',
       '3. scamRisk: HIGH bei mindestens einer eindeutigen Masche, MEDIUM bei einzelnen Auffälligkeiten, sonst LOW.',
-      '4. Personenbezogene Daten sind durch Platzhalter ersetzt: [TELEFONNUMMER], [E-MAIL], [IBAN], [LINK: domain].',
+      '4. Personenbezogene Daten sind durch Platzhalter ersetzt, z. B. [NAME], [TELEFONNUMMER], [E-MAIL], [ADRESSE], [IBAN],',
+      '   [KARTENNUMMER], [CODE], [LINK: domain]. Ein Platzhalter zeigt, dass solche Daten im Original standen.',
       '',
       'ANTWORTENTWURF (Feld replyDraft):',
       '- Deutsch, ' + (sie ? 'höflich per Sie' : 'per du') + ', freundlich und knapp (2–4 Sätze), keine Emojis.',
-      '- Beginne mit „Hallo <Vorname>,“ (oder „Hallo,“ wenn kein Name bekannt ist) und schließe mit ' + closing + '.',
+      '- Beginne mit „Hallo [NAME],“ ([NAME] wird automatisch ersetzt) und schließe mit ' + closing + '.',
+      '- Verwende sonst keine Platzhalter aus der Nachricht in der Antwort.',
       '- Erfinde keine Fakten zum Artikel (Zustand, Maße, Zubehör). Wenn etwas unbekannt ist, antworte neutral oder kündige eine Rückmeldung an.',
       '- Sage keinen Preis zu, außer das Verkäuferprofil erlaubt es; reagiere auf Preisvorschläge offen und freundlich.',
       '- Keine Links, Telefonnummern, E-Mail-Adressen, Anschriften oder Bankdaten.',
@@ -1333,19 +1343,20 @@ const Prompt = (() => {
     ].join('\n');
   }
 
+  // Der Name des Interessenten geht nicht an die KI; ReplyPolicy setzt ihn lokal in die Anrede ein
   function userPrompt(mail, ruleResult, cfg) {
+    const names = [mail.senderName];
     const warnings = ruleResult.findings.length
       ? ruleResult.findings.map(f => '- ' + f.label).join('\n')
       : 'keine';
     return [
       'Plattform: ' + mail.platform.name,
-      'Anzeige: ' + field(mail.listingTitle, 120),
-      'Name des Interessenten: ' + field(mail.senderName, 40),
+      'Anzeige: ' + field(mail.listingTitle && TextUtils.redactPii(mail.listingTitle, names), 120),
       'Warnsignale der automatischen Regelprüfung (evtl. unvollständig):',
       warnings,
       '',
       '<nachricht>',
-      sanitizeMessage(mail.text, cfg.LLM_MAX_INPUT_CHARS),
+      sanitizeMessage(mail.text, cfg.LLM_MAX_INPUT_CHARS, names),
       '</nachricht>'
     ].join('\n');
   }
@@ -1479,7 +1490,8 @@ const AnalysisParser = (() => {
  * - Modell-Fallback-Kette (LLM_MODELS),
  * - Kompatibilitätsmodus (ohne System-Rolle/JSON-Modus) bei HTTP 400,
  * - Circuit Breaker: nach Tageslimit (429 „per day“) oder 402 pausiert die KI,
- *   statt bei jeder weiteren Mail erneut zu scheitern.
+ *   statt bei jeder weiteren Mail erneut zu scheitern,
+ * - LLM_ZDR_ONLY: nur Anbieter mit Zero Data Retention (keine Speicherung, kein Training).
  *
  * Free-Tier (Stand 2026): 20 Anfragen/Minute; 50 Anfragen/Tag, bzw. 1000/Tag
  * nach einmaligem Kauf von mind. 10 Credits.
@@ -1560,7 +1572,8 @@ const OpenRouter = (() => {
       return new LlmError('Tageslimit erreicht (429): ' + msg, { status: status, fatal: true });
     }
     if (status === 404) {
-      return new LlmError('Modell nicht verfügbar (404) – entfernt oder durch Datenschutz-Einstellungen blockiert: ' + msg, { status: status });
+      const hint = cfg.LLM_ZDR_ONLY ? 'entfernt oder derzeit kein Anbieter ohne Datenspeicherung (ZDR)' : 'entfernt oder durch Datenschutz-Einstellungen blockiert';
+      return new LlmError('Modell nicht verfügbar (404) – ' + hint + ': ' + msg, { status: status });
     }
     return new LlmError('HTTP ' + status + ': ' + msg, { status: status });
   }
@@ -1569,6 +1582,7 @@ const OpenRouter = (() => {
 
   function buildBody(model, messages, cfg, compat) {
     const body = { model: model, temperature: cfg.LLM_TEMPERATURE, max_tokens: cfg.LLM_MAX_TOKENS };
+    if (cfg.LLM_ZDR_ONLY) body.provider = { zdr: true, data_collection: 'deny' };
     if (compat) {
       // Manche Anbieter kennen keine System-Rolle bzw. keinen JSON-Modus
       body.messages = [{ role: 'user', content: messages.map(m => m.content).join('\n\n') }];
@@ -1662,17 +1676,35 @@ const OpenRouter = (() => {
       const out = m.architecture && m.architecture.output_modalities;
       return !Array.isArray(out) || out.indexOf('text') !== -1;
     };
+    let zdr = null;
+    try {
+      zdr = listZdrModelIds();
+    } catch (e) {
+      Log.warn('ZDR-Liste nicht abrufbar: ' + Log.errorMessage(e));
+    }
     return (res.json.data || [])
       .filter(m => /:free$/.test(m.id) || (m.pricing && Number(m.pricing.prompt) === 0 && Number(m.pricing.completion) === 0))
       .filter(producesText)
       .map(m => ({
         id: m.id,
         context: m.context_length,
-        jsonMode: (m.supported_parameters || []).some(p => p === 'response_format' || p === 'structured_outputs')
+        jsonMode: (m.supported_parameters || []).some(p => p === 'response_format' || p === 'structured_outputs'),
+        zdr: zdr ? zdr.indexOf(m.id) !== -1 : null
       }));
   }
 
-  return { analyze, cooldown, startCooldown, clearCooldown, keyInfo, listFreeModels, shortModel };
+  /** Modelle mit mindestens einem Zero-Data-Retention-Anbieter (öffentlicher Endpunkt, kein Key nötig). */
+  function listZdrModelIds() {
+    const res = Http.request({ url: BASE_URL + '/endpoints/zdr', label: 'OpenRouter ZDR' });
+    if (res.status !== 200 || !res.json) throw new LlmError('ZDR-Liste nicht abrufbar (HTTP ' + res.status + ')');
+    const ids = [];
+    (res.json.data || []).forEach(e => {
+      if (e.model_id && ids.indexOf(e.model_id) === -1) ids.push(e.model_id);
+    });
+    return ids;
+  }
+
+  return { analyze, cooldown, startCooldown, clearCooldown, keyInfo, listFreeModels, listZdrModelIds, shortModel };
 })();
 
 // ======================================================================
@@ -1689,9 +1721,21 @@ const ReplyPolicy = (() => {
     return String(cfg.FORM_OF_ADDRESS || '').toLowerCase() === 'sie';
   }
 
+  function firstName(mail) {
+    return mail.senderName ? mail.senderName.split(/\s+/)[0] : '';
+  }
+
   function greeting(mail) {
-    const first = mail.senderName ? mail.senderName.split(/\s+/)[0] : '';
+    const first = firstName(mail);
     return 'Hallo' + (first ? ' ' + first : '') + ',';
+  }
+
+  /** Die KI kennt den Namen nicht und schreibt „Hallo [NAME],“ – der Name wird erst hier eingesetzt. */
+  function personalize(reply, mail) {
+    const first = firstName(mail);
+    let text = String(reply || '').replace(/ ?\[NAME\]/g, first ? ' ' + first : '');
+    if (first) text = text.replace(/^(\s*(?:hallo|hi|guten tag|servus|moin))\s*,/i, '$1 ' + first + ',');
+    return text;
   }
 
   function closing(cfg) {
@@ -1746,6 +1790,7 @@ const ReplyPolicy = (() => {
     if (TextUtils.extractPhones(text).length) problems.push('enthält Telefonnummer');
     if (TextUtils.extractEmails(text).length) problems.push('enthält E-Mail-Adresse');
     if (TextUtils.extractIbans(text).length) problems.push('enthält Bankdaten');
+    if (/\[(?:[A-ZÄÖÜ-]{3,}|LINK:[^\]]*)\]/.test(text)) problems.push('enthält Platzhalter');
     if (/[{}]|"\s*:\s*["\[]/.test(text)) problems.push('Formatfehler');
     return problems;
   }
@@ -1761,8 +1806,9 @@ const ReplyPolicy = (() => {
       return { text: safetyTemplate(mail, cfg), source: 'SAFETY_TEMPLATE', rejected: [] };
     }
     if (input.llmReply) {
-      const problems = inspect(input.llmReply, mail.allowedDomains);
-      if (!problems.length) return { text: input.llmReply.trim(), source: 'LLM', rejected: [] };
+      const reply = personalize(input.llmReply, mail);
+      const problems = inspect(reply, mail.allowedDomains);
+      if (!problems.length) return { text: reply.trim(), source: 'LLM', rejected: [] };
       Log.warn('KI-Antwortentwurf verworfen (' + problems.join(', ') + ') – nutze Vorlage.');
       return { text: fallbackTemplate(mail, input.fields, cfg), source: 'TEMPLATE', rejected: problems };
     }
@@ -1779,7 +1825,8 @@ const ReplyPolicy = (() => {
  * Formatiert das Analyseergebnis als Telegram-Nachricht (HTML-Modus).
  *
  * - Alle dynamischen Inhalte werden HTML-escaped (Käufertext ist nicht vertrauenswürdig).
- * - Fremde Links im Nachrichtentext werden entschärft („hxxps://evil[.]com“).
+ * - Fremde Links im Nachrichtentext werden entschärft („hxxps://evil[.]com“), IBANs, Kartendaten,
+ *   Codes und Ausweisnummern geschwärzt (der Originaltext bleibt in Gmail).
  * - Antwortvorschlag steht in <pre> → in Telegram per Antippen kopierbar.
  * - Das Telegram-Limit von 4096 Zeichen wird durch stufenweises Kürzen der Vorschau eingehalten.
  */
@@ -1872,7 +1919,8 @@ const NotificationFormatter = (() => {
     }
 
     if (previewLimit > 0 && mail.text) {
-      const preview = TextUtils.truncate(TextUtils.defangUrls(mail.text, mail.allowedDomains), previewLimit);
+      const safeText = TextUtils.defangUrls(TextUtils.redactSecrets(mail.text), mail.allowedDomains);
+      const preview = TextUtils.truncate(safeText, previewLimit);
       lines.push('');
       lines.push('💬 <b>Nachricht:</b>');
       lines.push('<blockquote expandable>' + esc(preview) + '</blockquote>');
@@ -2221,7 +2269,8 @@ const Http = (() => {
  * - Normalisierung für robuste Mustererkennung (Homoglyphen, unsichtbare Zeichen, Leetspeak)
  * - HTML ⇄ Text
  * - Erkennung von Links, Telefonnummern, E-Mail-Adressen und IBANs
- * - Schwärzung personenbezogener Daten (vor dem LLM) und Entschärfen von Links (für Telegram)
+ * - Schwärzung personenbezogener Daten (vor dem LLM), von Finanz-/Zugangsdaten (auch für Telegram)
+ *   und Entschärfen von Links
  */
 const TextUtils = (() => {
   const INVISIBLE = /[­​-‏‪-‮⁠-⁤﻿]/g;
@@ -2439,17 +2488,115 @@ const TextUtils = (() => {
 
   // ---------------------------------------------------------------- Schwärzen & Entschärfen
 
+  // Schlüsselwort + optionales „ist/lautet/:“ + Wert; der Wert wird ersetzt, das Schlüsselwort bleibt als Signal
+  const SEP = '(\\s*(?:ist|lautet|:|=)?\\s*)';
+  const WITH_DIGIT = '[a-z0-9-]*\\d[a-z0-9-]*';
+  const CODE_VALUE = '[a-z0-9-]*\\d{3}[a-z0-9-]*';
+  const SECRET_PATTERNS = [
+    [new RegExp('\\b(passwort|kennwort|password|zugangsdaten)' + SEP + '(\\S{3,}?)(?=[.,;:!?]*(?:\\s|$))', 'gi'), '[GEHEIM]'],
+    [new RegExp('\\b(cvv2?|cvc2?|kartenpr(?:ü|ue)fnummer|pr(?:ü|ue)fziffer|sicherheitscode|pin|tan|sms-?code|' +
+      'best(?:ä|ae)tigungs-?code|verifizierungs-?code|einmal-?code|code)' + SEP + '(' + CODE_VALUE + ')', 'gi'), '[CODE]'],
+    [new RegExp('\\b(g(?:ü|ue)ltig bis|ablaufdatum|valid thru|exp\\.?)' + SEP + '(\\d{1,2}\\s*\\/\\s*\\d{2,4})\\b', 'gi'), '[DATUM]'],
+    [new RegExp('\\b(bic|swift)' + SEP + '([a-z]{6}[a-z0-9]{2}(?:[a-z0-9]{3})?)\\b', 'gi'), '[BIC]'],
+    [new RegExp('\\b(kontonummer|konto-?nr\\.?|kto\\.?-?nr\\.?|blz|bankleitzahl)' + SEP + '(\\d[\\d ]{3,}\\d)', 'gi'), '[KONTO]'],
+    [new RegExp('\\b((?:personal)?ausweis(?:-?nummer|-?nr\\.?)?|reisepass(?:-?nummer|-?nr\\.?)?|pass(?:-?nummer|-?nr\\.?)|' +
+      'f(?:ü|ue)hrerschein(?:-?nummer|-?nr\\.?)?)' + SEP + '(' + WITH_DIGIT + '(?: ?' + WITH_DIGIT + '){0,3})', 'gi'), '[AUSWEIS]'],
+    [new RegExp('\\b(sv-?nummer|sv-?nr\\.?|svnr|(?:sozial)?versicherungs-?(?:nummer|nr\\.?))' + SEP + '(\\d[\\d ]{8,12}\\d)', 'gi'), '[SVNR]'],
+    [new RegExp('\\b(steuer-?id|steuer-?identifikationsnummer|steuernummer|ust-?id(?:-?nr\\.?)?|uid(?:-?nr\\.?)?)' + SEP +
+      '([a-z]{0,3}[\\d\\/ ]{6,}\\d)', 'gi'), '[STEUERNR]']
+  ];
+
+  const CARD_SOURCE = '\\d(?:[ -]?\\d){12,18}(?!\\d)';
+
+  function isLuhnValid(digits) {
+    let sum = 0;
+    for (let i = 0; i < digits.length; i++) {
+      let d = Number(digits.charAt(digits.length - 1 - i));
+      if (i % 2 === 1) {
+        d *= 2;
+        if (d > 9) d -= 9;
+      }
+      sum += d;
+    }
+    return sum % 10 === 0;
+  }
+
+  /** Kreditkartennummern (Prüfsumme gültig); Telefonnummern beginnen mit 0 oder + und bleiben unberührt. */
+  function redactCards(text) {
+    return String(text || '').replace(new RegExp(CARD_SOURCE, 'g'), (m, offset, str) => {
+      const digits = m.replace(/\D/g, '');
+      const before = str.charAt(offset - 1);
+      if (/[\d+]/.test(before) || digits.charAt(0) === '0' || !isLuhnValid(digits)) return m;
+      return '[KARTENNUMMER]';
+    });
+  }
+
+  /**
+   * Finanz- und Zugangsdaten, die außer dem Inhaber niemand braucht (IBAN, Karte, Codes, Ausweis …).
+   * Wird auch für die Telegram-Vorschau verwendet – der Originaltext bleibt in Gmail.
+   */
+  function redactSecrets(text) {
+    let s = String(text || '').replace(new RegExp(IBAN_SOURCE, 'gi'), m => (isIbanCandidate(m) ? '[IBAN]' : m));
+    s = redactCards(s);
+    SECRET_PATTERNS.forEach(p => {
+      s = s.replace(p[0], (m, keyword, sep) => keyword + (sep || ' ') + p[1]);
+    });
+    return s;
+  }
+
+  const NOT_LETTER_BEFORE = '(?<![A-Za-zÄÖÜäöüß])';
+  const STREET_SUFFIX = 'stra(?:ß|ss)e|str\\.|gasse|weg|platz|allee|ring|damm|ufer|steig|zeile|promenade|kai|pfad|chaussee';
+  const ADDRESS_RE = new RegExp(NOT_LETTER_BEFORE +
+    '(?:[A-ZÄÖÜ][a-zäöüß]{2,}(?:-[A-ZÄÖÜ]?[a-zäöüß]+)*(?:' + STREET_SUFFIX + ')' +
+    '|[A-ZÄÖÜ][a-zäöüß]+ (?:Stra(?:ß|ss)e|Str\\.|Gasse|Allee|Platz|Weg|Ring))' +
+    '\\s*\\d{1,4}\\s?[a-z]?(?![\\wäöüß])(?:\\s*\\/\\s*\\d{1,4})*' +
+    '(?!\\s*(?:[Mm]in(?:uten)?|[Ss]ek(?:unden)?|[Ss]td|[Ss]tunden|km|m|[Mm]eter|[Mm]al|[Ss]tück|[Ee]uro|€)(?![a-zäöüß]))', 'g');
+  const BIRTHDATE_RE = new RegExp('\\b(geb\\.|geboren(?: am)?|geburtsdatum|geb\\.?-?datum|geburtstag)' +
+    '(\\s*(?:ist|am|:)?\\s*)\\d{1,2}\\.\\s?\\d{1,2}\\.\\s?\\d{2,4}\\b', 'gi');
+  const HANDLE_RE = /(^|[\s(„"'])@[a-z0-9_.]{3,30}\b/gim;
+
+  const NAME_WORD = '[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?';
+  const NAMES = NAME_WORD + '(?: ' + NAME_WORD + '){0,2}';
+  const INTRO_RE = new RegExp('((?:[Mm]ein [Nn]ame ist|[Ii]ch hei(?:ß|ss)e)\\s+)' + NAMES, 'g');
+  const SIGNOFF_RE = new RegExp('((?:^|\\n)[ \\t]*(?:(?:[Vv]iele|[Ll]iebe|[Bb]este|[Ff]reundliche|[Hh]erzliche|[Mm]it freundlichen) )?' +
+    '(?:[Gg]r(?:ü|ue|u)(?:ß|ss)e?|LG|VG|MfG|GLG|BG|lg|vg|mfg)[,.!]?(?:[ \\t]*\\n[ \\t]*|[ \\t]+))' + NAMES + '(?=[ \\t]*(?:\\n|$))', 'g');
+
+  function escapeRegex(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function redactNames(text, names) {
+    let s = String(text || '');
+    const known = [];
+    const hasLetter = p => /[A-Za-zÄÖÜäöüß]/.test(p);
+    (names || []).filter(Boolean).forEach(n => {
+      const full = String(n).trim();
+      if (full.length >= 2 && hasLetter(full)) known.push(full);
+      full.split(/[\s_.-]+/).filter(p => p.length >= 3 && hasLetter(p)).forEach(p => known.push(p));
+    });
+    s = s.replace(INTRO_RE, '$1[NAME]').replace(SIGNOFF_RE, '$1[NAME]');
+    known.sort((a, b) => b.length - a.length).forEach(n => {
+      s = s.replace(new RegExp(NOT_LETTER_BEFORE + escapeRegex(n) + '(?![A-Za-zÄÖÜäöüß0-9_])', 'g'), '[NAME]');
+    });
+    return s;
+  }
+
   /**
    * Ersetzt personenbezogene Daten durch Platzhalter, bevor Text an das LLM geht.
    * Das Signal bleibt erhalten („[TELEFONNUMMER]“ zeigt weiterhin einen Kontaktwechsel an).
+   * @param {string[]=} names  bekannte Namen (z. B. Absender), die ebenfalls ersetzt werden
    */
-  function redactPii(text) {
-    let s = String(text || '');
-    s = s.replace(new RegExp(IBAN_SOURCE, 'gi'), m => (isIbanCandidate(m) ? '[IBAN]' : m));
+  function redactPii(text, names) {
+    let s = redactSecrets(text);
     s = deobfuscateEmails(s).replace(new RegExp(EMAIL_SOURCE, 'gi'), '[E-MAIL]');
     s = s.replace(urlRegex(), (m, offset, str) => (isUrlStart(str, offset) ? '[LINK: ' + hostOf(m) + ']' : m));
     s = s.replace(new RegExp(PHONE_SOURCE, 'g'), m => (isPhoneCandidate(m) ? '[TELEFONNUMMER]' : m));
-    return s;
+    s = s.replace(HANDLE_RE, '$1[BENUTZERNAME]');
+    s = s.replace(ADDRESS_RE, '[ADRESSE]')
+      .replace(/(\[ADRESSE\],?\s*)(?:[A-Z]{1,2}-)?\d{4,5}\b/g, '$1[PLZ]')
+      .replace(new RegExp('\\b(plz|postleitzahl)' + SEP + '\\d{4,5}\\b', 'gi'), '$1$2[PLZ]');
+    s = s.replace(BIRTHDATE_RE, '$1$2[GEBURTSDATUM]');
+    return redactNames(s, names);
   }
 
   /** Macht fremde Links unklickbar („hxxps://evil[.]com“). Erlaubte Domains bleiben unverändert. */
@@ -2501,7 +2648,7 @@ const TextUtils = (() => {
     normalize, squash, isNegatedAt,
     escapeHtml, decodeEntities, htmlToText, stripTags,
     extractUrls, hostOf, hostMatches, extractPhones, extractEmails, extractIbans,
-    redactPii, defangUrls,
+    redactPii, redactSecrets, defangUrls,
     truncate, oneLine, parseNumber, formatEuro
   };
 })();
@@ -2540,11 +2687,12 @@ const Config = (() => {
 
     // --- KI (OpenRouter) ---
     LLM_ENABLED: true,
-    // Reihenfolge = Fallback-Kette. Aktuelle Gratis-Modelle: Funktion listFreeModels()
+    // Nur Anbieter ohne Datenspeicherung (Zero Data Retention) – dort wird nichts gespeichert oder trainiert
+    LLM_ZDR_ONLY: true,
+    // Reihenfolge = Fallback-Kette; nur Gratis-Modelle mit ZDR-Anbieter. Aktuelle Liste: listFreeModels()
     LLM_MODELS: [
-      'google/gemma-4-31b-it:free',
-      'nvidia/nemotron-3-super-120b-a12b:free',
       'qwen/qwen3.8-27b:free',
+      'inclusionai/ling-3.0-flash-sante:free',
       'openrouter/free'
     ],
     LLM_TEMPERATURE: 0.2,

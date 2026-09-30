@@ -45,6 +45,22 @@ describe('ReplyPolicy', () => {
     });
   });
 
+  it('setzt den Namen erst lokal in den KI-Entwurf ein', () => {
+    const withPlaceholder = ReplyPolicy.decide({ mail, risk: lowRisk, fields, cfg, llmReply: 'Hallo [NAME],\n\nja, ist noch da.\n\nViele Grüße' });
+    assert.equal(withPlaceholder.source, 'LLM');
+    assert.match(withPlaceholder.text, /^Hallo Anna,/);
+    const plainHallo = ReplyPolicy.decide({ mail, risk: lowRisk, fields, cfg, llmReply: 'Hallo,\n\nja, ist noch da.\n\nViele Grüße' });
+    assert.match(plainHallo.text, /^Hallo Anna,/);
+    const noName = ReplyPolicy.decide({ mail: Object.assign({}, mail, { senderName: null }), risk: lowRisk, fields, cfg, llmReply: 'Hallo [NAME],\n\nja.\n\nViele Grüße' });
+    assert.match(noName.text, /^Hallo,/);
+  });
+
+  it('verwirft KI-Entwürfe mit übernommenen Platzhaltern', () => {
+    const r = ReplyPolicy.decide({ mail, risk: lowRisk, fields, cfg, llmReply: 'Hallo [NAME], wir treffen uns bei [ADRESSE]. Viele Grüße' });
+    assert.equal(r.source, 'TEMPLATE');
+    assert.ok(r.rejected.indexOf('enthält Platzhalter') !== -1);
+  });
+
   it('nutzt bei hohem Risiko immer die Sicherheitsvorlage', () => {
     const r = ReplyPolicy.decide({ mail, risk: { level: 'HIGH' }, fields, cfg, llmReply: 'Klar, schick mir den Kurier!' });
     assert.equal(r.source, 'SAFETY_TEMPLATE');
@@ -85,6 +101,13 @@ describe('NotificationFormatter', () => {
     assert.match(n.text, /🛑 <b>Empfehlung:<\/b>/);
     assert.match(n.text, /hxxps:\/\/kleinanzeigen-sicher-bezahlen\[\.\]shop/);
     assert.ok(!n.text.includes('https://kleinanzeigen-sicher-bezahlen.shop'));
+  });
+
+  it('schwärzt Bank-, Karten- und Zugangsdaten auch in der Telegram-Vorschau', () => {
+    const mail = Object.assign(mailFor(0), { text: 'Überweise an DE89 3704 0044 0532 0130 00, Karte 4111 1111 1111 1111, Code 482913' });
+    const n = NotificationFormatter.format(mail, resultFor(mail), {});
+    assert.match(n.text, /Überweise an \[IBAN\], Karte \[KARTENNUMMER\], Code \[CODE\]/);
+    assert.ok(!/DE89|4111|482913/.test(n.text));
   });
 
   it('escaped HTML aus dem Käufertext', () => {

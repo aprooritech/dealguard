@@ -4,7 +4,8 @@
  * Schutz gegen Prompt-Injection:
  * - Die Käufernachricht steht isoliert zwischen <nachricht>-Tags und wird ausdrücklich als Daten markiert.
  * - Versuche, die Tags selbst zu schließen, werden entfernt.
- * - Telefonnummern, E-Mails, IBANs und Links werden vorher durch Platzhalter ersetzt (Datensparsamkeit).
+ * - Personenbezogene Daten (Namen, Kontakt-, Adress-, Bank- und Kartendaten, Codes, Links) werden vorher
+ *   durch Platzhalter ersetzt (TextUtils.redactPii); der Name des Interessenten wird gar nicht übertragen.
  * - Unabhängig davon kann das LLM die Regelbewertung nur erhöhen, nie senken (RiskEngine.combine).
  */
 const Prompt = (() => {
@@ -12,8 +13,8 @@ const Prompt = (() => {
     return String(cfg.FORM_OF_ADDRESS || '').toLowerCase() === 'sie';
   }
 
-  function sanitizeMessage(text, maxChars) {
-    const redacted = TextUtils.redactPii(text).replace(/<\s*\/?\s*nachricht\s*>/gi, '[tag entfernt]');
+  function sanitizeMessage(text, maxChars, names) {
+    const redacted = TextUtils.redactPii(text, names).replace(/<\s*\/?\s*nachricht\s*>/gi, '[tag entfernt]');
     return TextUtils.truncate(redacted, maxChars);
   }
 
@@ -37,11 +38,13 @@ const Prompt = (() => {
       '   Käufer angeblich im Ausland; Kauf ungesehen zum vollen Preis;',
       '   bei eBay: Bitte, das Angebot vorzeitig zu beenden und direkt (außerhalb von eBay) zu bezahlen.',
       '3. scamRisk: HIGH bei mindestens einer eindeutigen Masche, MEDIUM bei einzelnen Auffälligkeiten, sonst LOW.',
-      '4. Personenbezogene Daten sind durch Platzhalter ersetzt: [TELEFONNUMMER], [E-MAIL], [IBAN], [LINK: domain].',
+      '4. Personenbezogene Daten sind durch Platzhalter ersetzt, z. B. [NAME], [TELEFONNUMMER], [E-MAIL], [ADRESSE], [IBAN],',
+      '   [KARTENNUMMER], [CODE], [LINK: domain]. Ein Platzhalter zeigt, dass solche Daten im Original standen.',
       '',
       'ANTWORTENTWURF (Feld replyDraft):',
       '- Deutsch, ' + (sie ? 'höflich per Sie' : 'per du') + ', freundlich und knapp (2–4 Sätze), keine Emojis.',
-      '- Beginne mit „Hallo <Vorname>,“ (oder „Hallo,“ wenn kein Name bekannt ist) und schließe mit ' + closing + '.',
+      '- Beginne mit „Hallo [NAME],“ ([NAME] wird automatisch ersetzt) und schließe mit ' + closing + '.',
+      '- Verwende sonst keine Platzhalter aus der Nachricht in der Antwort.',
       '- Erfinde keine Fakten zum Artikel (Zustand, Maße, Zubehör). Wenn etwas unbekannt ist, antworte neutral oder kündige eine Rückmeldung an.',
       '- Sage keinen Preis zu, außer das Verkäuferprofil erlaubt es; reagiere auf Preisvorschläge offen und freundlich.',
       '- Keine Links, Telefonnummern, E-Mail-Adressen, Anschriften oder Bankdaten.',
@@ -65,19 +68,20 @@ const Prompt = (() => {
     ].join('\n');
   }
 
+  // Der Name des Interessenten geht nicht an die KI; ReplyPolicy setzt ihn lokal in die Anrede ein
   function userPrompt(mail, ruleResult, cfg) {
+    const names = [mail.senderName];
     const warnings = ruleResult.findings.length
       ? ruleResult.findings.map(f => '- ' + f.label).join('\n')
       : 'keine';
     return [
       'Plattform: ' + mail.platform.name,
-      'Anzeige: ' + field(mail.listingTitle, 120),
-      'Name des Interessenten: ' + field(mail.senderName, 40),
+      'Anzeige: ' + field(mail.listingTitle && TextUtils.redactPii(mail.listingTitle, names), 120),
       'Warnsignale der automatischen Regelprüfung (evtl. unvollständig):',
       warnings,
       '',
       '<nachricht>',
-      sanitizeMessage(mail.text, cfg.LLM_MAX_INPUT_CHARS),
+      sanitizeMessage(mail.text, cfg.LLM_MAX_INPUT_CHARS, names),
       '</nachricht>'
     ].join('\n');
   }

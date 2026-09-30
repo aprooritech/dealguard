@@ -3,7 +3,8 @@
  * - Modell-Fallback-Kette (LLM_MODELS),
  * - Kompatibilitätsmodus (ohne System-Rolle/JSON-Modus) bei HTTP 400,
  * - Circuit Breaker: nach Tageslimit (429 „per day“) oder 402 pausiert die KI,
- *   statt bei jeder weiteren Mail erneut zu scheitern.
+ *   statt bei jeder weiteren Mail erneut zu scheitern,
+ * - LLM_ZDR_ONLY: nur Anbieter mit Zero Data Retention (keine Speicherung, kein Training).
  *
  * Free-Tier (Stand 2026): 20 Anfragen/Minute; 50 Anfragen/Tag, bzw. 1000/Tag
  * nach einmaligem Kauf von mind. 10 Credits.
@@ -84,7 +85,8 @@ const OpenRouter = (() => {
       return new LlmError('Tageslimit erreicht (429): ' + msg, { status: status, fatal: true });
     }
     if (status === 404) {
-      return new LlmError('Modell nicht verfügbar (404) – entfernt oder durch Datenschutz-Einstellungen blockiert: ' + msg, { status: status });
+      const hint = cfg.LLM_ZDR_ONLY ? 'entfernt oder derzeit kein Anbieter ohne Datenspeicherung (ZDR)' : 'entfernt oder durch Datenschutz-Einstellungen blockiert';
+      return new LlmError('Modell nicht verfügbar (404) – ' + hint + ': ' + msg, { status: status });
     }
     return new LlmError('HTTP ' + status + ': ' + msg, { status: status });
   }
@@ -93,6 +95,7 @@ const OpenRouter = (() => {
 
   function buildBody(model, messages, cfg, compat) {
     const body = { model: model, temperature: cfg.LLM_TEMPERATURE, max_tokens: cfg.LLM_MAX_TOKENS };
+    if (cfg.LLM_ZDR_ONLY) body.provider = { zdr: true, data_collection: 'deny' };
     if (compat) {
       // Manche Anbieter kennen keine System-Rolle bzw. keinen JSON-Modus
       body.messages = [{ role: 'user', content: messages.map(m => m.content).join('\n\n') }];
@@ -186,15 +189,33 @@ const OpenRouter = (() => {
       const out = m.architecture && m.architecture.output_modalities;
       return !Array.isArray(out) || out.indexOf('text') !== -1;
     };
+    let zdr = null;
+    try {
+      zdr = listZdrModelIds();
+    } catch (e) {
+      Log.warn('ZDR-Liste nicht abrufbar: ' + Log.errorMessage(e));
+    }
     return (res.json.data || [])
       .filter(m => /:free$/.test(m.id) || (m.pricing && Number(m.pricing.prompt) === 0 && Number(m.pricing.completion) === 0))
       .filter(producesText)
       .map(m => ({
         id: m.id,
         context: m.context_length,
-        jsonMode: (m.supported_parameters || []).some(p => p === 'response_format' || p === 'structured_outputs')
+        jsonMode: (m.supported_parameters || []).some(p => p === 'response_format' || p === 'structured_outputs'),
+        zdr: zdr ? zdr.indexOf(m.id) !== -1 : null
       }));
   }
 
-  return { analyze, cooldown, startCooldown, clearCooldown, keyInfo, listFreeModels, shortModel };
+  /** Modelle mit mindestens einem Zero-Data-Retention-Anbieter (öffentlicher Endpunkt, kein Key nötig). */
+  function listZdrModelIds() {
+    const res = Http.request({ url: BASE_URL + '/endpoints/zdr', label: 'OpenRouter ZDR' });
+    if (res.status !== 200 || !res.json) throw new LlmError('ZDR-Liste nicht abrufbar (HTTP ' + res.status + ')');
+    const ids = [];
+    (res.json.data || []).forEach(e => {
+      if (e.model_id && ids.indexOf(e.model_id) === -1) ids.push(e.model_id);
+    });
+    return ids;
+  }
+
+  return { analyze, cooldown, startCooldown, clearCooldown, keyInfo, listFreeModels, listZdrModelIds, shortModel };
 })();

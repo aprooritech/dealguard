@@ -3,7 +3,8 @@
  * - Normalisierung für robuste Mustererkennung (Homoglyphen, unsichtbare Zeichen, Leetspeak)
  * - HTML ⇄ Text
  * - Erkennung von Links, Telefonnummern, E-Mail-Adressen und IBANs
- * - Schwärzung personenbezogener Daten (vor dem LLM) und Entschärfen von Links (für Telegram)
+ * - Schwärzung personenbezogener Daten (vor dem LLM), von Finanz-/Zugangsdaten (auch für Telegram)
+ *   und Entschärfen von Links
  */
 const TextUtils = (() => {
   const INVISIBLE = /[­​-‏‪-‮⁠-⁤﻿]/g;
@@ -221,17 +222,115 @@ const TextUtils = (() => {
 
   // ---------------------------------------------------------------- Schwärzen & Entschärfen
 
+  // Schlüsselwort + optionales „ist/lautet/:“ + Wert; der Wert wird ersetzt, das Schlüsselwort bleibt als Signal
+  const SEP = '(\\s*(?:ist|lautet|:|=)?\\s*)';
+  const WITH_DIGIT = '[a-z0-9-]*\\d[a-z0-9-]*';
+  const CODE_VALUE = '[a-z0-9-]*\\d{3}[a-z0-9-]*';
+  const SECRET_PATTERNS = [
+    [new RegExp('\\b(passwort|kennwort|password|zugangsdaten)' + SEP + '(\\S{3,}?)(?=[.,;:!?]*(?:\\s|$))', 'gi'), '[GEHEIM]'],
+    [new RegExp('\\b(cvv2?|cvc2?|kartenpr(?:ü|ue)fnummer|pr(?:ü|ue)fziffer|sicherheitscode|pin|tan|sms-?code|' +
+      'best(?:ä|ae)tigungs-?code|verifizierungs-?code|einmal-?code|code)' + SEP + '(' + CODE_VALUE + ')', 'gi'), '[CODE]'],
+    [new RegExp('\\b(g(?:ü|ue)ltig bis|ablaufdatum|valid thru|exp\\.?)' + SEP + '(\\d{1,2}\\s*\\/\\s*\\d{2,4})\\b', 'gi'), '[DATUM]'],
+    [new RegExp('\\b(bic|swift)' + SEP + '([a-z]{6}[a-z0-9]{2}(?:[a-z0-9]{3})?)\\b', 'gi'), '[BIC]'],
+    [new RegExp('\\b(kontonummer|konto-?nr\\.?|kto\\.?-?nr\\.?|blz|bankleitzahl)' + SEP + '(\\d[\\d ]{3,}\\d)', 'gi'), '[KONTO]'],
+    [new RegExp('\\b((?:personal)?ausweis(?:-?nummer|-?nr\\.?)?|reisepass(?:-?nummer|-?nr\\.?)?|pass(?:-?nummer|-?nr\\.?)|' +
+      'f(?:ü|ue)hrerschein(?:-?nummer|-?nr\\.?)?)' + SEP + '(' + WITH_DIGIT + '(?: ?' + WITH_DIGIT + '){0,3})', 'gi'), '[AUSWEIS]'],
+    [new RegExp('\\b(sv-?nummer|sv-?nr\\.?|svnr|(?:sozial)?versicherungs-?(?:nummer|nr\\.?))' + SEP + '(\\d[\\d ]{8,12}\\d)', 'gi'), '[SVNR]'],
+    [new RegExp('\\b(steuer-?id|steuer-?identifikationsnummer|steuernummer|ust-?id(?:-?nr\\.?)?|uid(?:-?nr\\.?)?)' + SEP +
+      '([a-z]{0,3}[\\d\\/ ]{6,}\\d)', 'gi'), '[STEUERNR]']
+  ];
+
+  const CARD_SOURCE = '\\d(?:[ -]?\\d){12,18}(?!\\d)';
+
+  function isLuhnValid(digits) {
+    let sum = 0;
+    for (let i = 0; i < digits.length; i++) {
+      let d = Number(digits.charAt(digits.length - 1 - i));
+      if (i % 2 === 1) {
+        d *= 2;
+        if (d > 9) d -= 9;
+      }
+      sum += d;
+    }
+    return sum % 10 === 0;
+  }
+
+  /** Kreditkartennummern (Prüfsumme gültig); Telefonnummern beginnen mit 0 oder + und bleiben unberührt. */
+  function redactCards(text) {
+    return String(text || '').replace(new RegExp(CARD_SOURCE, 'g'), (m, offset, str) => {
+      const digits = m.replace(/\D/g, '');
+      const before = str.charAt(offset - 1);
+      if (/[\d+]/.test(before) || digits.charAt(0) === '0' || !isLuhnValid(digits)) return m;
+      return '[KARTENNUMMER]';
+    });
+  }
+
+  /**
+   * Finanz- und Zugangsdaten, die außer dem Inhaber niemand braucht (IBAN, Karte, Codes, Ausweis …).
+   * Wird auch für die Telegram-Vorschau verwendet – der Originaltext bleibt in Gmail.
+   */
+  function redactSecrets(text) {
+    let s = String(text || '').replace(new RegExp(IBAN_SOURCE, 'gi'), m => (isIbanCandidate(m) ? '[IBAN]' : m));
+    s = redactCards(s);
+    SECRET_PATTERNS.forEach(p => {
+      s = s.replace(p[0], (m, keyword, sep) => keyword + (sep || ' ') + p[1]);
+    });
+    return s;
+  }
+
+  const NOT_LETTER_BEFORE = '(?<![A-Za-zÄÖÜäöüß])';
+  const STREET_SUFFIX = 'stra(?:ß|ss)e|str\\.|gasse|weg|platz|allee|ring|damm|ufer|steig|zeile|promenade|kai|pfad|chaussee';
+  const ADDRESS_RE = new RegExp(NOT_LETTER_BEFORE +
+    '(?:[A-ZÄÖÜ][a-zäöüß]{2,}(?:-[A-ZÄÖÜ]?[a-zäöüß]+)*(?:' + STREET_SUFFIX + ')' +
+    '|[A-ZÄÖÜ][a-zäöüß]+ (?:Stra(?:ß|ss)e|Str\\.|Gasse|Allee|Platz|Weg|Ring))' +
+    '\\s*\\d{1,4}\\s?[a-z]?(?![\\wäöüß])(?:\\s*\\/\\s*\\d{1,4})*' +
+    '(?!\\s*(?:[Mm]in(?:uten)?|[Ss]ek(?:unden)?|[Ss]td|[Ss]tunden|km|m|[Mm]eter|[Mm]al|[Ss]tück|[Ee]uro|€)(?![a-zäöüß]))', 'g');
+  const BIRTHDATE_RE = new RegExp('\\b(geb\\.|geboren(?: am)?|geburtsdatum|geb\\.?-?datum|geburtstag)' +
+    '(\\s*(?:ist|am|:)?\\s*)\\d{1,2}\\.\\s?\\d{1,2}\\.\\s?\\d{2,4}\\b', 'gi');
+  const HANDLE_RE = /(^|[\s(„"'])@[a-z0-9_.]{3,30}\b/gim;
+
+  const NAME_WORD = '[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?';
+  const NAMES = NAME_WORD + '(?: ' + NAME_WORD + '){0,2}';
+  const INTRO_RE = new RegExp('((?:[Mm]ein [Nn]ame ist|[Ii]ch hei(?:ß|ss)e)\\s+)' + NAMES, 'g');
+  const SIGNOFF_RE = new RegExp('((?:^|\\n)[ \\t]*(?:(?:[Vv]iele|[Ll]iebe|[Bb]este|[Ff]reundliche|[Hh]erzliche|[Mm]it freundlichen) )?' +
+    '(?:[Gg]r(?:ü|ue|u)(?:ß|ss)e?|LG|VG|MfG|GLG|BG|lg|vg|mfg)[,.!]?(?:[ \\t]*\\n[ \\t]*|[ \\t]+))' + NAMES + '(?=[ \\t]*(?:\\n|$))', 'g');
+
+  function escapeRegex(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function redactNames(text, names) {
+    let s = String(text || '');
+    const known = [];
+    const hasLetter = p => /[A-Za-zÄÖÜäöüß]/.test(p);
+    (names || []).filter(Boolean).forEach(n => {
+      const full = String(n).trim();
+      if (full.length >= 2 && hasLetter(full)) known.push(full);
+      full.split(/[\s_.-]+/).filter(p => p.length >= 3 && hasLetter(p)).forEach(p => known.push(p));
+    });
+    s = s.replace(INTRO_RE, '$1[NAME]').replace(SIGNOFF_RE, '$1[NAME]');
+    known.sort((a, b) => b.length - a.length).forEach(n => {
+      s = s.replace(new RegExp(NOT_LETTER_BEFORE + escapeRegex(n) + '(?![A-Za-zÄÖÜäöüß0-9_])', 'g'), '[NAME]');
+    });
+    return s;
+  }
+
   /**
    * Ersetzt personenbezogene Daten durch Platzhalter, bevor Text an das LLM geht.
    * Das Signal bleibt erhalten („[TELEFONNUMMER]“ zeigt weiterhin einen Kontaktwechsel an).
+   * @param {string[]=} names  bekannte Namen (z. B. Absender), die ebenfalls ersetzt werden
    */
-  function redactPii(text) {
-    let s = String(text || '');
-    s = s.replace(new RegExp(IBAN_SOURCE, 'gi'), m => (isIbanCandidate(m) ? '[IBAN]' : m));
+  function redactPii(text, names) {
+    let s = redactSecrets(text);
     s = deobfuscateEmails(s).replace(new RegExp(EMAIL_SOURCE, 'gi'), '[E-MAIL]');
     s = s.replace(urlRegex(), (m, offset, str) => (isUrlStart(str, offset) ? '[LINK: ' + hostOf(m) + ']' : m));
     s = s.replace(new RegExp(PHONE_SOURCE, 'g'), m => (isPhoneCandidate(m) ? '[TELEFONNUMMER]' : m));
-    return s;
+    s = s.replace(HANDLE_RE, '$1[BENUTZERNAME]');
+    s = s.replace(ADDRESS_RE, '[ADRESSE]')
+      .replace(/(\[ADRESSE\],?\s*)(?:[A-Z]{1,2}-)?\d{4,5}\b/g, '$1[PLZ]')
+      .replace(new RegExp('\\b(plz|postleitzahl)' + SEP + '\\d{4,5}\\b', 'gi'), '$1$2[PLZ]');
+    s = s.replace(BIRTHDATE_RE, '$1$2[GEBURTSDATUM]');
+    return redactNames(s, names);
   }
 
   /** Macht fremde Links unklickbar („hxxps://evil[.]com“). Erlaubte Domains bleiben unverändert. */
@@ -283,7 +382,7 @@ const TextUtils = (() => {
     normalize, squash, isNegatedAt,
     escapeHtml, decodeEntities, htmlToText, stripTags,
     extractUrls, hostOf, hostMatches, extractPhones, extractEmails, extractIbans,
-    redactPii, defangUrls,
+    redactPii, redactSecrets, defangUrls,
     truncate, oneLine, parseNumber, formatEuro
   };
 })();

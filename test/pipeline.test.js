@@ -32,7 +32,9 @@ describe('Pipeline – Normalbetrieb', () => {
     assert.match(msg.text, /Antwort: KI/);
 
     const [call] = env.llmCalls();
-    assert.equal(call.body.model, 'google/gemma-4-31b-it:free');
+    assert.equal(call.body.model, 'qwen/qwen3.8-27b:free');
+    assert.deepEqual(JSON.parse(JSON.stringify(call.body.provider)), { zdr: true, data_collection: 'deny' });
+    assert.ok(!call.body.messages[1].content.includes('Anna'), 'Käufername darf nicht an die KI gehen');
     assert.equal(call.params.headers.Authorization, 'Bearer sk-or-v1-testkey-0123456789abcdef');
     assert.equal(call.body.response_format.type, 'json_object');
 
@@ -136,16 +138,16 @@ describe('Pipeline – Fehlerbehandlung', () => {
     const env = createEnv({
       mails: [BENIGN],
       route: (url, body) => {
-        if (url.endsWith('/chat/completions') && body.model === 'google/gemma-4-31b-it:free') {
-          return { status: 429, body: { error: { code: 429, message: 'google/gemma-4-31b-it:free is temporarily rate-limited upstream' } } };
+        if (url.endsWith('/chat/completions') && body.model === 'qwen/qwen3.8-27b:free') {
+          return { status: 429, body: { error: { code: 429, message: 'qwen/qwen3.8-27b:free is temporarily rate-limited upstream' } } };
         }
         return undefined;
       }
     });
     env.global.processInbox();
     const models = env.llmCalls().map(c => c.body.model);
-    assert.deepEqual(models, ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3-super-120b-a12b:free']);
-    assert.match(env.telegramMessages()[0].text, /KI: nemotron-3-super-120b-a12b/);
+    assert.deepEqual(models, ['qwen/qwen3.8-27b:free', 'inclusionai/ling-3.0-flash-sante:free']);
+    assert.match(env.telegramMessages()[0].text, /KI: ling-3.0-flash-sante/);
   });
 
   it('wiederholt 400 im Kompatibilitätsmodus (ohne System-Rolle/JSON-Modus)', () => {
@@ -189,7 +191,7 @@ describe('Pipeline – Fehlerbehandlung', () => {
   it('ungültige KI-Antworten führen zum nächsten Modell, danach zur Vorlage', () => {
     const env = createEnv({ mails: [BENIGN], llmContent: () => 'Ich kann leider kein JSON.' });
     env.global.processInbox();
-    assert.equal(env.llmCalls().length, 4);
+    assert.equal(env.llmCalls().length, 3);
     assert.match(env.telegramMessages()[0].text, /Antwort: Vorlage/);
   });
 
@@ -292,10 +294,19 @@ describe('Einrichtung & Diagnose', () => {
     assert.equal(env.triggers[0].getHandlerFunction(), 'processInbox');
     assert.equal(env.triggers[0].minutes, 5);
     assert.match(env.logText(), /Gratis-Anfragen heute: 3\/50/);
-    assert.match(env.logText(), /Modell nicht \(mehr\) kostenlos verfügbar: nvidia/);
+    assert.match(env.logText(), /nur KI-Anbieter ohne Datenspeicherung \(ZDR\)/);
+    assert.ok(!/Modell nicht \(mehr\)|keinen Anbieter ohne Datenspeicherung/.test(env.logText()), 'Standardmodelle sind gratis und ZDR');
     assert.match(env.telegramMessages()[0].text, /DealGuard ist aktiv/);
     env.global.uninstall();
     assert.equal(env.triggers.length, 0);
+  });
+
+  it('setup() warnt vor verschwundenen Modellen und Modellen ohne ZDR-Anbieter', () => {
+    const env = createEnv({ props: { LLM_MODELS: 'nvidia/verschwunden:free, google/gemma-4-31b-it:free, qwen/qwen3.8-27b:free' } });
+    env.global.setup();
+    assert.match(env.logText(), /Modell nicht \(mehr\) kostenlos verfügbar: nvidia\/verschwunden:free/);
+    assert.match(env.logText(), /keinen Anbieter ohne Datenspeicherung \(ZDR\) und wird nie genutzt: google\/gemma-4-31b-it:free/);
+    assert.ok(!/nie genutzt: qwen/.test(env.logText()));
   });
 
   it('setup() nennt fehlende Properties', () => {

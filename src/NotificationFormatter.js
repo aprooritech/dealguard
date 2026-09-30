@@ -2,7 +2,8 @@
  * Formatiert das Analyseergebnis als Telegram-Nachricht (HTML-Modus).
  *
  * - Alle dynamischen Inhalte werden HTML-escaped (Käufertext ist nicht vertrauenswürdig).
- * - Fremde Links im Nachrichtentext werden entschärft („hxxps://evil[.]com“).
+ * - Fremde Links im Nachrichtentext werden entschärft („hxxps://evil[.]com“), IBANs, Kartendaten,
+ *   Codes und Ausweisnummern geschwärzt (der Originaltext bleibt in Gmail).
  * - Antwortvorschlag steht in <pre> → in Telegram per Antippen kopierbar.
  * - Das Telegram-Limit von 4096 Zeichen wird durch stufenweises Kürzen der Vorschau eingehalten.
  */
@@ -95,7 +96,8 @@ const NotificationFormatter = (() => {
     }
 
     if (previewLimit > 0 && mail.text) {
-      const preview = TextUtils.truncate(TextUtils.defangUrls(mail.text, mail.allowedDomains), previewLimit);
+      const safeText = TextUtils.defangUrls(TextUtils.redactSecrets(mail.text), mail.allowedDomains);
+      const preview = TextUtils.truncate(safeText, previewLimit);
       lines.push('');
       lines.push('💬 <b>Nachricht:</b>');
       lines.push('<blockquote expandable>' + esc(preview) + '</blockquote>');

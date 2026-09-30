@@ -144,7 +144,7 @@ function llmResponse(content, model) {
     status: 200,
     body: {
       id: 'gen-1',
-      model: model || 'google/gemma-4-31b-it:free',
+      model: model || 'qwen/qwen3.8-27b:free',
       choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 100, completion_tokens: 50 }
     }
@@ -166,7 +166,11 @@ function defaultRoute(options) {
       return { status: 200, body: { data: { is_free_tier: true, free_model_daily_requests: { used: 3, limit: 50, remaining: 47 } } } };
     }
     if (url.endsWith('/api/v1/models')) {
-      return { status: 200, body: { data: [{ id: 'google/gemma-4-31b-it:free', context_length: 262144, pricing: { prompt: '0', completion: '0' }, supported_parameters: ['response_format'] }] } };
+      const free = id => ({ id, context_length: 262144, pricing: { prompt: '0', completion: '0' }, supported_parameters: [] });
+      return { status: 200, body: { data: ['qwen/qwen3.8-27b:free', 'inclusionai/ling-3.0-flash-sante:free', 'google/gemma-4-31b-it:free', 'openrouter/free'].map(free) } };
+    }
+    if (url.endsWith('/api/v1/endpoints/zdr')) {
+      return { status: 200, body: { data: [{ model_id: 'qwen/qwen3.8-27b:free', provider_name: 'ModelRun' }, { model_id: 'inclusionai/ling-3.0-flash-sante:free', provider_name: 'Novita' }] } };
     }
     return { status: 404, body: { error: 'unbekannte URL ' + url } };
   };

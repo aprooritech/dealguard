@@ -9,9 +9,21 @@ const ReplyPolicy = (() => {
     return String(cfg.FORM_OF_ADDRESS || '').toLowerCase() === 'sie';
   }
 
+  function firstName(mail) {
+    return mail.senderName ? mail.senderName.split(/\s+/)[0] : '';
+  }
+
   function greeting(mail) {
-    const first = mail.senderName ? mail.senderName.split(/\s+/)[0] : '';
+    const first = firstName(mail);
     return 'Hallo' + (first ? ' ' + first : '') + ',';
+  }
+
+  /** Die KI kennt den Namen nicht und schreibt „Hallo [NAME],“ – der Name wird erst hier eingesetzt. */
+  function personalize(reply, mail) {
+    const first = firstName(mail);
+    let text = String(reply || '').replace(/ ?\[NAME\]/g, first ? ' ' + first : '');
+    if (first) text = text.replace(/^(\s*(?:hallo|hi|guten tag|servus|moin))\s*,/i, '$1 ' + first + ',');
+    return text;
   }
 
   function closing(cfg) {
@@ -66,6 +78,7 @@ const ReplyPolicy = (() => {
     if (TextUtils.extractPhones(text).length) problems.push('enthält Telefonnummer');
     if (TextUtils.extractEmails(text).length) problems.push('enthält E-Mail-Adresse');
     if (TextUtils.extractIbans(text).length) problems.push('enthält Bankdaten');
+    if (/\[(?:[A-ZÄÖÜ-]{3,}|LINK:[^\]]*)\]/.test(text)) problems.push('enthält Platzhalter');
     if (/[{}]|"\s*:\s*["\[]/.test(text)) problems.push('Formatfehler');
     return problems;
   }
@@ -81,8 +94,9 @@ const ReplyPolicy = (() => {
       return { text: safetyTemplate(mail, cfg), source: 'SAFETY_TEMPLATE', rejected: [] };
     }
     if (input.llmReply) {
-      const problems = inspect(input.llmReply, mail.allowedDomains);
-      if (!problems.length) return { text: input.llmReply.trim(), source: 'LLM', rejected: [] };
+      const reply = personalize(input.llmReply, mail);
+      const problems = inspect(reply, mail.allowedDomains);
+      if (!problems.length) return { text: reply.trim(), source: 'LLM', rejected: [] };
       Log.warn('KI-Antwortentwurf verworfen (' + problems.join(', ') + ') – nutze Vorlage.');
       return { text: fallbackTemplate(mail, input.fields, cfg), source: 'TEMPLATE', rejected: problems };
     }

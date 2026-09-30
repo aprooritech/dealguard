@@ -29,11 +29,12 @@ const Config = (() => {
 
     // --- KI (OpenRouter) ---
     LLM_ENABLED: true,
-    // Reihenfolge = Fallback-Kette. Aktuelle Gratis-Modelle: Funktion listFreeModels()
+    // Nur Anbieter ohne Datenspeicherung (Zero Data Retention) – dort wird nichts gespeichert oder trainiert
+    LLM_ZDR_ONLY: true,
+    // Reihenfolge = Fallback-Kette; nur Gratis-Modelle mit ZDR-Anbieter. Aktuelle Liste: listFreeModels()
     LLM_MODELS: [
-      'google/gemma-4-31b-it:free',
-      'nvidia/nemotron-3-super-120b-a12b:free',
       'qwen/qwen3.8-27b:free',
+      'inclusionai/ling-3.0-flash-sante:free',
       'openrouter/free'
     ],
     LLM_TEMPERATURE: 0.2,

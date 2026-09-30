@@ -58,6 +58,34 @@ describe('TextUtils', () => {
     assert.equal(out, 'Tel [TELEFONNUMMER], [E-MAIL], [IBAN], [LINK: x-pay.shop]');
   });
 
+  it('schwärzt Karten-, Bank-, Ausweis- und Zugangsdaten', () => {
+    const out = TextUtils.redactSecrets(
+      'Karte 4111 1111 1111 1111, gültig bis 12/27, CVV 123. SMS-Code: 482913, Passwort: geheim123! ' +
+      'BIC: RZVAAT2B422, Kontonummer 12345678, Ausweisnummer: P1234567, SV-Nr 1234 010190');
+    assert.equal(out,
+      'Karte [KARTENNUMMER], gültig bis [DATUM], CVV [CODE]. SMS-Code: [CODE], Passwort: [GEHEIM]! ' +
+      'BIC: [BIC], Kontonummer [KONTO], Ausweisnummer: [AUSWEIS], SV-Nr [SVNR]');
+  });
+
+  it('lässt Telefonnummern, Preise und ungültige Kartennummern stehen', () => {
+    const text = 'Ruf an +43 664 1234 5678. 1.200 € ok? Nummer 4111 1111 1111 1112, Pin 2 fehlt';
+    assert.equal(TextUtils.redactSecrets(text), text);
+  });
+
+  it('schwärzt Anschrift, Geburtsdatum, Benutzernamen und Namen', () => {
+    const out = TextUtils.redactPii(
+      'Mein Name ist Max Mustermann, geb. 12.03.1990, Bahnhofstraße 12, 6850 Dornbirn. Insta @max.muster\nViele Grüße\nMax',
+      []);
+    assert.equal(out, 'Mein Name ist [NAME], geb. [GEBURTSDATUM], [ADRESSE], [PLZ] Dornbirn. Insta [BENUTZERNAME]\nViele Grüße\n[NAME]');
+    assert.equal(TextUtils.redactPii('Grüße, Anna Maria', []), 'Grüße, [NAME]');
+    assert.equal(TextUtils.redactPii('Hier Anna, passt Wiener Straße 5?', ['Anna Beispiel']), 'Hier [NAME], passt [ADRESSE]?');
+  });
+
+  it('behält Termine, Preise und Wege, die keine Adresse sind', () => {
+    const text = 'Ich biete 150 € und komme am 12.10. um 18 Uhr. Fußweg 5 Minuten. Viele Grüße aus Wien';
+    assert.equal(TextUtils.redactPii(text, ['kaeufer_123']), text);
+  });
+
   it('parst deutsche Zahlen und formatiert Euro', () => {
     assert.equal(TextUtils.parseNumber('1.200,50 €'), 1200.5);
     assert.equal(TextUtils.parseNumber('150,-'), 150);
