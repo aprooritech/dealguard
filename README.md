@@ -31,23 +31,9 @@ mit Betrugs-Check und fertigem Antwortvorschlag.
 
 **So sieht eine Benachrichtigung aus**
 
-```
-🔴 HOHES RISIKO · Kleinanzeigen
-📌 Sony PlayStation 5
-👤 Mark · 24.09. 14:32
-
-🎯 Absicht: Kaufinteresse
-⚠️ Warnsignale (Regel-Score 100/100):
-• Will auf WhatsApp/Telegram & Co. wechseln
-• Abholung durch Kurier/Spedition
-• Masche: Kurierabholung + Vorabzahlung/Ausland
-🛑 Empfehlung: Nicht darauf eingehen.
-
-💬 Nachricht ▸ (Links entschärft)
-✍️ Antwortvorschlag (antippen = kopieren)
-
-[📋 Antwort kopieren] [📧 Gmail] [🔗 Anzeige]
-```
+<p align="center">
+  <img src="docs/telegram-beispiel.jpeg" alt="Echte DealGuard-Benachrichtigung in Telegram" width="320">
+</p>
 
 </td>
 <td width="50%" valign="top">
