@@ -37,7 +37,7 @@ describe('Pipeline – Normalbetrieb', () => {
     assert.equal(call.body.response_format.type, 'json_object');
 
     assert.equal(env.gmail.message('msg1').unread, false);
-    assert.deepEqual(env.gmail.threadLabels('t1'), ['Marktplatz-KI']);
+    assert.deepEqual(env.gmail.threadLabels('t1'), ['DealGuard']);
     assert.deepEqual(state(env).done, ['msg1']);
     assert.ok(!env.logText().includes('sk-or-v1-testkey'), 'API-Key darf nicht im Log stehen');
   });
@@ -205,7 +205,7 @@ describe('Pipeline – Fehlerbehandlung', () => {
     }
     env.global.processInbox();
     assert.equal(env.gmail.message('msg1').unread, true, 'bleibt ungelesen – du wurdest nicht benachrichtigt');
-    assert.deepEqual(env.gmail.threadLabels('t1'), ['Marktplatz-KI/Fehler']);
+    assert.deepEqual(env.gmail.threadLabels('t1'), ['DealGuard/Fehler']);
     assert.deepEqual(state(env).done, ['msg1']);
     assert.equal(env.global.processInbox().candidates, 0);
   });
@@ -293,7 +293,7 @@ describe('Einrichtung & Diagnose', () => {
     assert.equal(env.triggers[0].minutes, 5);
     assert.match(env.logText(), /Gratis-Anfragen heute: 3\/50/);
     assert.match(env.logText(), /Modell nicht \(mehr\) kostenlos verfügbar: nvidia/);
-    assert.match(env.telegramMessages()[0].text, /Marktplatz-Assistent ist aktiv/);
+    assert.match(env.telegramMessages()[0].text, /DealGuard ist aktiv/);
     env.global.uninstall();
     assert.equal(env.triggers.length, 0);
   });

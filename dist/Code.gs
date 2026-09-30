@@ -1,5 +1,5 @@
 /**
- * Marktplatz-Assistent – gebündelte Fassung für den Apps-Script-Editor.
+ * DealGuard – gebündelte Fassung für den Apps-Script-Editor.
  * Automatisch erzeugt mit `npm run bundle` aus src/*.js – Änderungen bitte dort vornehmen.
  */
 // ======================================================================
@@ -76,7 +76,7 @@ function setup() {
   Log.info('✔ Trigger installiert: processInbox alle ' + cfg.TRIGGER_MINUTES + ' Minuten.');
 
   Telegram.sendMessage({
-    text: '✅ <b>Marktplatz-Assistent ist aktiv.</b>\nDein Postfach wird alle ' + cfg.TRIGGER_MINUTES + ' Minuten geprüft.'
+    text: '✅ <b>DealGuard ist aktiv.</b>\nDein Postfach wird alle ' + cfg.TRIGGER_MINUTES + ' Minuten geprüft.'
   });
 }
 
@@ -1494,7 +1494,7 @@ const OpenRouter = (() => {
     return {
       Authorization: 'Bearer ' + Config.secret('OPENROUTER_API_KEY'),
       'HTTP-Referer': 'https://script.google.com',
-      'X-Title': 'Marketplace Assistant (Apps Script)'
+      'X-Title': 'DealGuard (Apps Script)'
     };
   }
 
@@ -2033,7 +2033,7 @@ const Alerts = (() => {
       if (cache.get(cacheKey)) return false;
       cache.put(cacheKey, '1', Math.min(21600, Math.max(60, cfg.ALERT_THROTTLE_MINUTES * 60)));
       Telegram.sendMessage({
-        text: '⚠️ <b>Marktplatz-Assistent</b>\n' + TextUtils.escapeHtml(title) +
+        text: '⚠️ <b>DealGuard</b>\n' + TextUtils.escapeHtml(title) +
           (detail ? '\n<code>' + TextUtils.escapeHtml(TextUtils.truncate(Log.redact(detail), 500)) + '</code>' : '')
       });
       return true;
@@ -2533,8 +2533,8 @@ const Config = (() => {
       'wurde (veröffentlicht|gelöscht|deaktiviert|verlängert)', 'newsletter',
       'deine rechnung', 'bewerte (jetzt )?', 'passwort', 'bestätige deine'
     ],
-    PROCESSED_LABEL: 'Marktplatz-KI',
-    FAILED_LABEL: 'Marktplatz-KI/Fehler',
+    PROCESSED_LABEL: 'DealGuard',
+    FAILED_LABEL: 'DealGuard/Fehler',
     CREATE_GMAIL_DRAFTS: false,
     ALLOWED_LINK_DOMAINS: [],
 

@@ -69,7 +69,7 @@ function setup() {
   Log.info('✔ Trigger installiert: processInbox alle ' + cfg.TRIGGER_MINUTES + ' Minuten.');
 
   Telegram.sendMessage({
-    text: '✅ <b>Marktplatz-Assistent ist aktiv.</b>\nDein Postfach wird alle ' + cfg.TRIGGER_MINUTES + ' Minuten geprüft.'
+    text: '✅ <b>DealGuard ist aktiv.</b>\nDein Postfach wird alle ' + cfg.TRIGGER_MINUTES + ' Minuten geprüft.'
   });
 }
 

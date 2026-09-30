@@ -18,7 +18,7 @@ const OpenRouter = (() => {
     return {
       Authorization: 'Bearer ' + Config.secret('OPENROUTER_API_KEY'),
       'HTTP-Referer': 'https://script.google.com',
-      'X-Title': 'Marketplace Assistant (Apps Script)'
+      'X-Title': 'DealGuard (Apps Script)'
     };
   }
 

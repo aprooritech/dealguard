@@ -24,7 +24,7 @@ const ordered = ORDER.filter(f => files.includes(f)).concat(files.filter(f => !O
 
 const header = [
   '/**',
-  ' * Marktplatz-Assistent – gebündelte Fassung für den Apps-Script-Editor.',
+  ' * DealGuard – gebündelte Fassung für den Apps-Script-Editor.',
   ' * Automatisch erzeugt mit `npm run bundle` aus src/*.js – Änderungen bitte dort vornehmen.',
   ' */',
   ''

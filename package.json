@@ -1,5 +1,5 @@
 {
-  "name": "marktplatz-assistent",
+  "name": "dealguard",
   "version": "1.0.0",
   "private": true,
   "description": "Gmail → OpenRouter (Free) → Telegram: KI-Assistent mit Scam-Schutz für Kleinanzeigen, willhaben & eBay auf Google Apps Script",

@@ -17,7 +17,7 @@ const Alerts = (() => {
       if (cache.get(cacheKey)) return false;
       cache.put(cacheKey, '1', Math.min(21600, Math.max(60, cfg.ALERT_THROTTLE_MINUTES * 60)));
       Telegram.sendMessage({
-        text: '⚠️ <b>Marktplatz-Assistent</b>\n' + TextUtils.escapeHtml(title) +
+        text: '⚠️ <b>DealGuard</b>\n' + TextUtils.escapeHtml(title) +
           (detail ? '\n<code>' + TextUtils.escapeHtml(TextUtils.truncate(Log.redact(detail), 500)) + '</code>' : '')
       });
       return true;

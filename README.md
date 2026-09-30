@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛡️ Marktplatz-Assistent
+# 🛡️ DealGuard
 
 **Dein KI-Bodyguard für Kleinanzeigen, willhaben & eBay.**<br>
 Neue Käufernachrichten landen in Sekunden als übersichtliche Telegram-Push auf deinem Handy,
@@ -107,7 +107,7 @@ Die Regeln laufen **vor** der KI und sind nicht manipulierbar. Die KI darf das R
 
 ### 3️⃣ Apps-Script-Projekt anlegen
 
-1. [script.google.com](https://script.google.com) → *Neues Projekt* und z. B. „Marktplatz-Assistent“ nennen.
+1. [script.google.com](https://script.google.com) → *Neues Projekt* und „DealGuard“ nennen.
 2. ⚙️ *Projekteinstellungen*: Haken bei **„Manifestdatei ‚appsscript.json‘ im Editor anzeigen“** setzen.
 3. Im Editor den Inhalt von `Code.gs` komplett durch [`dist/Code.gs`](dist/Code.gs) ersetzen
    und `appsscript.json` durch [`dist/appsscript.json`](dist/appsscript.json). Mit **Strg+S** speichern.
@@ -151,7 +151,7 @@ npm run push                          # bündelt, testet und lädt hoch
 1. Deinem Bot in Telegram eine Nachricht schicken (siehe oben).
 2. Im Editor die Funktion **`showTelegramChatId`** auswählen und auf **▷ Ausführen** klicken.
 3. Beim ersten Start fragt Google nach Berechtigungen. Die Warnung *„Google hat diese App nicht überprüft“* ist bei
-   eigenen Skripten normal: *Erweitert* → *Zu Marktplatz-Assistent wechseln* → *Zulassen*.
+   eigenen Skripten normal: *Erweitert* → *Zu DealGuard wechseln* → *Zulassen*.
 4. Im Log erscheint `Chat-ID 123456789 (Dein Name)`. Nur die **Zahl** als `TELEGRAM_CHAT_ID` eintragen.
 
 Steht im Log *„Keine Chats gefunden“*, hat der Bot noch keine Nachricht von dir. Schreib ihm und führe die Funktion erneut aus.
@@ -160,7 +160,7 @@ Steht im Log *„Keine Chats gefunden“*, hat der Bot noch keine Nachricht von 
 
 Funktion **`setup`** ausführen. Sie prüft die Konfiguration, Telegram, OpenRouter (inkl. Gratis-Kontingent und
 Verfügbarkeit der Modelle) und die Gmail-Suche. Dann installiert sie den Trigger und schickt dir
-**✅ Marktplatz-Assistent ist aktiv** aufs Handy.
+**✅ DealGuard ist aktiv** aufs Handy.
 
 **Fertig. Ab jetzt läuft alles automatisch**, auch wenn der Browser zu ist.
 
@@ -207,7 +207,7 @@ WhatsApp-Umleitung, Kurierabholung und Gutscheinkarten reichen **jeweils allein*
 | Modell kennt keine System-Rolle / keinen JSON-Modus | automatischer Kompatibilitätsmodus |
 | Tageslimit (50 Gratis-Anfragen) erreicht | KI pausiert bis zum Reset, **Pushes kommen weiter** (Regeln + Heuristik), einmaliger Hinweis |
 | KI liefert kaputtes JSON | robustes Parsing, sonst nächstes Modell, sonst Vorlage |
-| Telegram nicht erreichbar | Mail bleibt ungelesen, nächster Lauf versucht es erneut. Nach 5 Fehlversuchen Label `Marktplatz-KI/Fehler` + Alarm |
+| Telegram nicht erreichbar | Mail bleibt ungelesen, nächster Lauf versucht es erneut. Nach 5 Fehlversuchen Label `DealGuard/Fehler` + Alarm |
 | Telegram lehnt Formatierung ab | Versand als Klartext |
 | Als-gelesen-Markieren scheitert | kein Doppel-Push (verarbeitete IDs werden vorher gespeichert) |
 | Token ungültig / Property fehlt | Abbruch mit klarer Meldung. Google mailt dir fehlgeschlagene Trigger-Läufe |
@@ -241,7 +241,7 @@ Alle Werte sind optional und lassen sich per Script-Property gleichen Namens üb
 | `GMAIL_QUERY` | siehe unten | Welche Mails verarbeitet werden. Vorher in der Gmail-Suche testen |
 | `SKIP_SUBJECT_PATTERNS` | Suchaufträge, Ablauf-Hinweise, … | Betreff-Regex für System-Mails ohne Käufernachricht |
 | `ALLOWED_LINK_DOMAINS` | – | Zusätzliche vertrauenswürdige Link-Domains |
-| `PROCESSED_LABEL` / `FAILED_LABEL` | `Marktplatz-KI` / `…/Fehler` | Gmail-Labels (leer = aus) |
+| `PROCESSED_LABEL` / `FAILED_LABEL` | `DealGuard` / `DealGuard/Fehler` | Gmail-Labels (leer = aus) |
 | `CREATE_GMAIL_DRAFTS` | `false` | Antwortentwurf zusätzlich als Gmail-Entwurf (nur wenn deine Plattform Antworten per Mail annimmt, nie bei hohem Risiko) |
 | `LLM_ENABLED` | `true` | `false` = nur Regeln + Heuristik, nichts geht an einen KI-Anbieter |
 | `LLM_SKIP_ON_HIGH_RULE_RISK` | `true` | Eindeutigen Scam nicht an die KI schicken (spart Kontingent) |

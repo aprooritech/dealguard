@@ -22,8 +22,8 @@ const Config = (() => {
       'wurde (veröffentlicht|gelöscht|deaktiviert|verlängert)', 'newsletter',
       'deine rechnung', 'bewerte (jetzt )?', 'passwort', 'bestätige deine'
     ],
-    PROCESSED_LABEL: 'Marktplatz-KI',
-    FAILED_LABEL: 'Marktplatz-KI/Fehler',
+    PROCESSED_LABEL: 'DealGuard',
+    FAILED_LABEL: 'DealGuard/Fehler',
     CREATE_GMAIL_DRAFTS: false,
     ALLOWED_LINK_DOMAINS: [],
 
