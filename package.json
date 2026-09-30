@@ -1,0 +1,16 @@
+{
+  "name": "marktplatz-assistent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gmail → OpenRouter (Free) → Telegram: KI-Assistent mit Scam-Schutz für Kleinanzeigen, willhaben & eBay auf Google Apps Script",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "bundle": "node scripts/bundle.js",
+    "check": "npm run bundle && npm test",
+    "push": "npm run check && clasp push"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}
